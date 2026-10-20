@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DS Font Config">
+  <defs>
+    <linearGradient id="fs-icon-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4C8DFF"/>
+      <stop offset="1" stop-color="#2B5BD7"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#fs-icon-bg)"/>
+  <path d="M14 47 L24 17 L34 47" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M19 37.5 H29" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="45" cy="40" r="7" fill="none" stroke="#FFFFFF" stroke-width="4"/>
+  <path d="M52 33 V47" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>
+  <path d="M14 54 H50" fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

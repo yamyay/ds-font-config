@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DS Font Config",
+    "description": "Typography settings for DeepSeek Harness: independent font family, size, and line height for the interface, conversation, artifact preview, and monospace text."
+  }
+}
