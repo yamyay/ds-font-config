@@ -1,6 +1,6 @@
 # ds-font-config
 
-Typography settings for **DeepSeek Harness** (DSH). It adds a **Fonts** page to Settings where the interface, conversation, artifact preview, and monospace text can each use an independent font family, size, and line height.
+Typography and sidebar layout settings for **DeepSeek Harness** (DSH). It adds a **Fonts** page to Settings where the interface, conversation, artifact preview, and monospace text can each use an independent font family, size, and line height. It also adds a General-settings switch that hides the collapsed sidebar rail and puts an expand button at the start of the conversation title bar.
 
 ## Features
 
@@ -9,6 +9,8 @@ Typography settings for **DeepSeek Harness** (DSH). It adds a **Fonts** page to 
 - Changes apply live and are stored in the current browser.
 - Empty fields keep the current/theme value instead of forcing an override.
 - "Restore defaults" returns to the values below.
+- **Hide the collapsed sidebar rail** (on by default): when enabled and the sidebar is collapsed, the 56px left rail and its grid track are removed, and a sidebar button appears at the left of the conversation title bar to reopen it. The switch lives under **Settings → General**.
+- The title-bar button is hidden on Desktop platforms that already provide a window-chrome sidebar control.
 
 ## Defaults
 
@@ -23,7 +25,7 @@ System fonts are used for the defaults; the plugin falls back to the built-in DS
 
 ## Install
 
-Install the package directory as a DSH bundle, then open **Settings → Fonts**:
+Install the package directory as a DSH bundle, then open **Settings → Fonts** (typography) or **Settings → General** (collapsed-sidebar rail switch):
 
 ```bash
 git clone https://github.com/yamyay/ds-font-config.git
@@ -35,8 +37,8 @@ Use the DSH Plugin Manager / `plugin_manager install_bundle` with the cloned dir
 
 The bundle has no build step:
 
-- `index.js` — Host half (empty; typography lives in the browser half).
-- `client.js` — Client half: the settings page and the injected stylesheet.
+- `index.js` — Host half (empty; typography and layout state live in the browser half).
+- `client.js` — Client half: the settings page, the General-section switch, the title-bar button, and the injected stylesheet / sidebar-track override.
 - `cordis.patch.yml` — inserts the bundle row.
 - `locale/*.json` — Plugin Manager display metadata.
 - `icon.svg` — plugin icon.

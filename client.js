@@ -59,6 +59,9 @@ window.__ModuleLoader__.load({
         reset: '恢复默认',
         unit: 'px',
         lineUnit: '×',
+        'sidebarToggle.title': '收起侧栏时隐藏左侧细条',
+        'sidebarToggle.desc': '侧栏收起后隐藏左侧栏，只在对话标题栏左侧显示一个展开按钮。',
+        'sidebarToggle.open': '展开侧边栏',
       },
       en: {
         nav: 'Fonts',
@@ -85,6 +88,9 @@ window.__ModuleLoader__.load({
         reset: 'Restore defaults',
         unit: 'px',
         lineUnit: '×',
+        'sidebarToggle.title': 'Hide the collapsed sidebar rail',
+        'sidebarToggle.desc': 'When the sidebar is collapsed, hide the left rail and show an expand button at the start of the conversation title bar.',
+        'sidebarToggle.open': 'Expand sidebar',
       },
     }
 
@@ -118,6 +124,25 @@ window.__ModuleLoader__.load({
 .fs-reset:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .fs-reset:disabled{opacity:.4;cursor:not-allowed}
 .fs-reset:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+/* General-section row: hide the collapsed-sidebar rail. */
+.rail-row{display:flex;align-items:center;gap:8px;padding:16px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
+.rail-text{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px;padding-right:48px}
+.rail-title{font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}
+.rail-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
+.rail-switch{box-sizing:border-box;position:relative;flex:0 0 auto;width:36px;height:20px;padding:2px;border:0;border-radius:999px;corner-shape:round;background:var(--dsw-alias-border-l3);cursor:pointer}
+.rail-switch[aria-checked='true']{background:var(--dsw-alias-brand-primary)}
+.rail-switch:disabled{cursor:default;opacity:.5}
+.rail-switch:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+.rail-thumb{display:block;width:16px;height:16px;border-radius:50%;corner-shape:round;background:var(--dsw-alias-label-primary-foreground);transition:transform 120ms ease}
+.rail-switch[aria-checked='false'] .rail-thumb{background:var(--dsw-alias-switch-thumb)}
+.rail-switch[aria-checked='true'] .rail-thumb{transform:translateX(16px)}
+/* Title-bar expand control, mounted only while the sidebar is collapsed. */
+[data-ds-rail-reopen]{display:none}
+[data-sidebar-collapsed] [data-ds-rail-reopen]{display:inline-flex}
+html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [data-ds-rail-reopen]{display:none!important}
+.rail-reopen{flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.rail-reopen:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.rail-reopen:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
 @media (max-width:720px){.fs-controls{grid-template-columns:1fr}.fs-actions{align-items:flex-start;flex-direction:column}}
 `
 
@@ -127,6 +152,7 @@ window.__ModuleLoader__.load({
         chat: { family: DEFAULT_TEXT_FAMILY, size: 13, lineHeight: 1 },
         preview: { family: DEFAULT_TEXT_FAMILY, size: 13, lineHeight: 1 },
         mono: { family: DEFAULT_MONO_FAMILY, size: 12, lineHeight: 1.2 },
+        hideCollapsedRail: true,
       }
     }
 
@@ -171,6 +197,7 @@ window.__ModuleLoader__.load({
 
     function applyStored(base, raw, respectEmpty) {
       if (raw === null) return base
+      if (typeof raw.hideCollapsedRail === 'boolean') base.hideCollapsedRail = raw.hideCollapsedRail
       for (const role of ROLES) {
         const entry = raw[role]
         if (entry === null || typeof entry !== 'object') continue
@@ -220,6 +247,15 @@ window.__ModuleLoader__.load({
 
     let state = loadState()
     let styleElement
+    let pluginCtx
+    let headerButtonDispose
+    let railObserver
+    let railObservedFrame = null
+    let railFrame = null
+    let railSidebarCol = null
+    let railSavedGrid = ''
+    let railAppliedGrid = ''
+    let railSyncScheduled = false
     const listeners = new Set()
 
     function emit() {
@@ -236,6 +272,7 @@ window.__ModuleLoader__.load({
       state = next
       saveState(state)
       applyStyles()
+      syncRailFeature()
       emit()
     }
 
@@ -248,7 +285,122 @@ window.__ModuleLoader__.load({
     }
 
     function resetAll() {
-      commitState(defaultState())
+      const defaults = defaultState()
+      // The font page's reset button must not flip the unrelated sidebar switch.
+      commitState(Object.assign({}, defaults, { hideCollapsedRail: state.hideCollapsedRail }))
+    }
+
+    function setHideCollapsedRail(value) {
+      commitState(Object.assign({}, state, { hideCollapsedRail: value }))
+    }
+
+    /** Locate the app frame through the stable right-sidebar column hook. */
+    function findAppFrame() {
+      if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return null
+      const rightbar = document.querySelector('[data-rightbar-col]')
+      const frame = rightbar === null ? null : rightbar.parentElement
+      if (frame instanceof HTMLElement) return frame
+      const collapsed = document.querySelector('[data-sidebar-collapsed]')
+      return collapsed instanceof HTMLElement ? collapsed : null
+    }
+
+    /** Undo the zero-width override and restore the sidebar column. */
+    function restoreRail() {
+      if (railFrame !== null && railAppliedGrid !== ''
+        && railFrame.style.gridTemplateColumns === railAppliedGrid) {
+        railFrame.style.gridTemplateColumns = railSavedGrid
+      }
+      if (railSidebarCol !== null) railSidebarCol.style.removeProperty('display')
+      railFrame = null
+      railSidebarCol = null
+      railSavedGrid = ''
+      railAppliedGrid = ''
+    }
+
+    /**
+     * Collapse the frame's first grid track to zero while the rail-hidden
+     * preference is on. The host writes this track inline as a px value, so the
+     * override keeps the centre and right tracks exactly as React computed them.
+     */
+    function applyRailCollapse() {
+      if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return
+      if (!state.hideCollapsedRail) return
+      const frame = findAppFrame()
+      if (frame === null) return
+      if (!frame.hasAttribute('data-sidebar-collapsed')) {
+        restoreRail()
+        return
+      }
+      const sidebarCol = frame.firstElementChild
+      if (!(sidebarCol instanceof HTMLElement)) return
+      if (railFrame !== frame) {
+        railFrame = frame
+        railSidebarCol = sidebarCol
+        railSavedGrid = frame.style.gridTemplateColumns
+      }
+      const current = frame.style.gridTemplateColumns
+      // React re-writes the host value after a resize/sidebar-report change;
+      // refresh the saved base before applying the zero-width override again.
+      if (current !== '' && !current.startsWith('0px') && current !== railAppliedGrid) {
+        railSavedGrid = current
+      }
+      if (railSavedGrid === '') return
+      const rest = railSavedGrid.replace(/^\s*\S+\s*/, '')
+      const next = `0px ${rest}`
+      if (current !== next) frame.style.gridTemplateColumns = next
+      railAppliedGrid = next
+      if (sidebarCol.style.display !== 'none') sidebarCol.style.display = 'none'
+    }
+
+    function attachRailObserver() {
+      if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return
+      const frame = findAppFrame()
+      if (frame === null || railObservedFrame === frame) return
+      if (railObserver === undefined) railObserver = new MutationObserver(scheduleRailSync)
+      railObserver.disconnect()
+      railObservedFrame = frame
+      railObserver.observe(frame, { attributes: true, attributeFilter: ['style', 'data-sidebar-collapsed'] })
+    }
+
+    function scheduleRailSync() {
+      if (railSyncScheduled) return
+      railSyncScheduled = true
+      const run = () => {
+        railSyncScheduled = false
+        applyRailCollapse()
+        attachRailObserver()
+      }
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run)
+      else run()
+    }
+
+    function stopRailObserver() {
+      if (railObserver !== undefined) railObserver.disconnect()
+      railObservedFrame = null
+      railSyncScheduled = false
+    }
+
+    /** Mount/unmount the title-bar button and the grid override together. */
+    function syncRailFeature() {
+      if (typeof document === 'undefined') return
+      if (state.hideCollapsedRail) {
+        if (pluginCtx !== undefined && headerButtonDispose === undefined) {
+          headerButtonDispose = pluginCtx.slots.inject('conversation.header.leading', () => pluginCtx.slots.register({
+            name: 'conversation.header.leading',
+            locale: 'ds-font-config',
+            inject: () => ({ toggleSidebar: () => { pluginCtx.layout.toggleSidebar() } }),
+          }, ReopenButton))
+        }
+        attachRailObserver()
+        applyRailCollapse()
+      } else {
+        if (headerButtonDispose !== undefined) {
+          headerButtonDispose()
+          headerButtonDispose = undefined
+        }
+        stopRailObserver()
+        restoreRail()
+      }
     }
 
     function px(value) {
@@ -413,7 +565,7 @@ window.__ModuleLoader__.load({
         styleElement.dataset.fontStudio = ''
         document.head.append(styleElement)
       }
-      styleElement.textContent = buildCss(state)
+      styleElement.textContent = STYLES + '\n' + buildCss(state)
       // Theme sheets are installed from their own plugin after boot; moving our
       // tag to the end keeps equal-specificity body rules winning after a change.
       document.head.append(styleElement)
@@ -564,6 +716,67 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function useHideCollapsedRail() {
+      const [enabled, setEnabled] = React.useState(state.hideCollapsedRail)
+      React.useEffect(() => {
+        const listener = () => { setEnabled(state.hideCollapsedRail) }
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      }, [])
+      return enabled
+    }
+
+    function SidebarGlyph() {
+      return h('svg', {
+        width: 16,
+        height: 16,
+        viewBox: '0 0 16 16',
+        fill: 'none',
+        'aria-hidden': true,
+      },
+        h('rect', {
+          x: 2, y: 2.5, width: 12, height: 11, rx: 2,
+          stroke: 'currentColor', strokeWidth: 1.3,
+        }),
+        h('path', {
+          d: 'M6 2.5v11',
+          stroke: 'currentColor', strokeWidth: 1.3,
+        }),
+      )
+    }
+
+    function ReopenButton({ t = key => key, toggleSidebar }) {
+      const enabled = useHideCollapsedRail()
+      if (!enabled) return null
+      const label = t('sidebarToggle.open')
+      return h('button', {
+        type: 'button',
+        className: 'rail-reopen',
+        'data-ds-rail-reopen': '',
+        'aria-label': label,
+        title: label,
+        onClick: toggleSidebar,
+      }, h(SidebarGlyph))
+    }
+
+    function SidebarRailRow({ t = key => key }) {
+      const enabled = useHideCollapsedRail()
+      return h('div', { className: 'rail-row' },
+        h('div', { className: 'rail-text' },
+          h('div', { className: 'rail-title' }, t('sidebarToggle.title')),
+          h('div', { className: 'rail-desc' }, t('sidebarToggle.desc')),
+        ),
+        h('button', {
+          type: 'button',
+          role: 'switch',
+          className: 'rail-switch',
+          'aria-checked': enabled,
+          'aria-label': t('sidebarToggle.title'),
+          onClick: () => { setHideCollapsedRail(!enabled) },
+        }, h('span', { className: 'rail-thumb' })),
+      )
+    }
+
     function FontsSection({ t = key => key }) {
       const [snapshot, setSnapshot] = React.useState(state)
       React.useEffect(() => {
@@ -602,8 +815,9 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'layout'],
       apply(ctx) {
+        pluginCtx = ctx
         ctx.effect(() => {
           try {
             return ctx.locale.register('ds-font-config', DICTIONARIES)
@@ -620,7 +834,22 @@ window.__ModuleLoader__.load({
             styleElement = undefined
           }
         })
+        ctx.effect(() => () => {
+          stopRailObserver()
+          restoreRail()
+          if (headerButtonDispose !== undefined) {
+            headerButtonDispose()
+            headerButtonDispose = undefined
+          }
+        })
         applyStyles()
+        syncRailFeature()
+        ctx.slots.inject('settings.general.item', () => ctx.slots.register({
+          name: 'settings.general.item',
+          id: 'ds-font-config-sidebar',
+          order: 13,
+          locale: 'ds-font-config',
+        }, SidebarRailRow))
         ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section',
           id: 'ds-font-config',

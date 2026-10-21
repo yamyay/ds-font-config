@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DS 字体配置",
-    "description": "分别设置 DeepSeek Harness 界面、对话、产物预览与等宽字体的字体族、字号和行距。"
+    "description": "分别设置 DeepSeek Harness 界面、对话、产物预览与等宽字体的字体族、字号和行距，并可隐藏收起后的左侧栏细条。"
   }
 }
