@@ -250,6 +250,7 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
     let pluginCtx
     let headerButtonDispose
     let railObserver
+    let railDiscoveryObserver
     let railObservedFrame = null
     let railFrame = null
     let railSidebarCol = null
@@ -355,11 +356,30 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
     function attachRailObserver() {
       if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return
       const frame = findAppFrame()
-      if (frame === null || railObservedFrame === frame) return
-      if (railObserver === undefined) railObserver = new MutationObserver(scheduleRailSync)
-      railObserver.disconnect()
-      railObservedFrame = frame
-      railObserver.observe(frame, { attributes: true, attributeFilter: ['style', 'data-sidebar-collapsed'] })
+      if (frame !== null) {
+        if (railDiscoveryObserver !== undefined) {
+          railDiscoveryObserver.disconnect()
+          railDiscoveryObserver = undefined
+        }
+        if (railObservedFrame === frame) return
+        if (railObserver === undefined) railObserver = new MutationObserver(scheduleRailSync)
+        railObserver.disconnect()
+        railObservedFrame = frame
+        railObserver.observe(frame, { attributes: true, attributeFilter: ['style', 'data-sidebar-collapsed'] })
+        return
+      }
+      // Client plugins apply before the frame mounts; discover it when it does.
+      if (document.body === null) return
+      if (railDiscoveryObserver === undefined) {
+        railDiscoveryObserver = new MutationObserver(() => {
+          if (findAppFrame() === null) return
+          railDiscoveryObserver?.disconnect()
+          railDiscoveryObserver = undefined
+          attachRailObserver()
+          applyRailCollapse()
+        })
+      }
+      railDiscoveryObserver.observe(document.body, { childList: true, subtree: true })
     }
 
     function scheduleRailSync() {
@@ -376,6 +396,8 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
 
     function stopRailObserver() {
       if (railObserver !== undefined) railObserver.disconnect()
+      if (railDiscoveryObserver !== undefined) railDiscoveryObserver.disconnect()
+      railDiscoveryObserver = undefined
       railObservedFrame = null
       railSyncScheduled = false
     }
