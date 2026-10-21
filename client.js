@@ -35,9 +35,9 @@ window.__ModuleLoader__.load({
 
     const DICTIONARIES = {
       zh: {
-        nav: '字体',
-        title: '字体',
-        intro: '默认界面、对话和产物预览为 13px、行距 1.0，等宽为 Monaco 12px、行距 1.2。留空沿用当前设置，修改立即生效并保存在此浏览器。',
+        nav: 'UI & 字体',
+        title: 'UI & 字体',
+        intro: '界面与字体设置：可隐藏侧栏收起后的左侧细条；默认界面、对话和产物预览为 13px、行距 1.0，等宽为 Monaco 12px、行距 1.2。留空沿用当前设置，修改立即生效并保存在此浏览器。',
         'group.ui.title': '界面',
         'group.ui.desc': '应用外壳、侧栏、设置、菜单与按钮等界面文字。',
         'group.chat.title': '对话',
@@ -64,9 +64,9 @@ window.__ModuleLoader__.load({
         'sidebarToggle.open': '展开侧边栏',
       },
       en: {
-        nav: 'Fonts',
-        title: 'Fonts',
-        intro: 'Defaults: 13px at 1.0 line height for the interface, conversation, and artifact preview; Monaco at 12px and 1.2 for monospace. Leave a field empty to keep the current setting. Changes apply immediately and stay in this browser.',
+        nav: 'UI & Fonts',
+        title: 'UI & Fonts',
+        intro: 'Interface and typography settings: hide the collapsed sidebar rail; defaults are 13px at 1.0 line height for the interface, conversation, and artifact preview, and Monaco at 12px/1.2 for monospace. Leave a field empty to keep the current setting; changes apply immediately and stay in this browser.',
         'group.ui.title': 'Interface',
         'group.ui.desc': 'Shell, sidebar, settings, menus, and button text.',
         'group.chat.title': 'Conversation',
@@ -124,18 +124,17 @@ window.__ModuleLoader__.load({
 .fs-reset:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .fs-reset:disabled{opacity:.4;cursor:not-allowed}
 .fs-reset:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
-/* General-section row: hide the collapsed-sidebar rail. */
-.rail-row{display:flex;align-items:center;gap:8px;padding:16px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
-.rail-text{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px;padding-right:48px}
-.rail-title{font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}
-.rail-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
-.rail-switch{box-sizing:border-box;position:relative;flex:0 0 auto;width:36px;height:20px;padding:2px;border:0;border-radius:999px;corner-shape:round;background:var(--dsw-alias-border-l3);cursor:pointer}
-.rail-switch[aria-checked='true']{background:var(--dsw-alias-brand-primary)}
-.rail-switch:disabled{cursor:default;opacity:.5}
-.rail-switch:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
-.rail-thumb{display:block;width:16px;height:16px;border-radius:50%;corner-shape:round;background:var(--dsw-alias-label-primary-foreground);transition:transform 120ms ease}
-.rail-switch[aria-checked='false'] .rail-thumb{background:var(--dsw-alias-switch-thumb)}
-.rail-switch[aria-checked='true'] .rail-thumb{transform:translateX(16px)}
+/* Sidebar switch card inside the UI & Fonts section. */
+.fs-switchRow{display:flex;align-items:center;gap:16px;padding:16px}
+.fs-switchText{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
+.fs-switch{box-sizing:border-box;position:relative;flex:0 0 auto;width:36px;height:20px;padding:2px;border:0;border-radius:999px;corner-shape:round;background:var(--dsw-alias-border-l3);cursor:pointer}
+.fs-switch[aria-checked='true']{background:var(--dsw-alias-brand-primary)}
+.fs-switch:disabled{cursor:default;opacity:.5}
+.fs-switch:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+.fs-thumb{display:block;width:16px;height:16px;border-radius:50%;corner-shape:round;background:var(--dsw-alias-label-primary-foreground);transition:transform 120ms ease}
+.fs-switch[aria-checked='false'] .fs-thumb{background:var(--dsw-alias-switch-thumb)}
+.fs-switch[aria-checked='true'] .fs-thumb{transform:translateX(16px)}
+.fs-frame + .fs-frame{margin-top:0}
 /* Title-bar expand control, mounted only while the sidebar is collapsed. */
 [data-ds-rail-reopen]{display:none}
 [data-sidebar-collapsed] [data-ds-rail-reopen]{display:inline-flex}
@@ -311,7 +310,11 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
         && railFrame.style.gridTemplateColumns === railAppliedGrid) {
         railFrame.style.gridTemplateColumns = railSavedGrid
       }
-      if (railSidebarCol !== null) railSidebarCol.style.removeProperty('display')
+      if (railSidebarCol !== null) {
+        railSidebarCol.style.removeProperty('display')
+        railSidebarCol.style.removeProperty('visibility')
+        railSidebarCol.style.removeProperty('pointer-events')
+      }
       railFrame = null
       railSidebarCol = null
       railSavedGrid = ''
@@ -350,7 +353,12 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       const next = `0px ${rest}`
       if (current !== next) frame.style.gridTemplateColumns = next
       railAppliedGrid = next
-      if (sidebarCol.style.display !== 'none') sidebarCol.style.display = 'none'
+      // The column must stay in the grid as the first item: hiding it with
+      // display:none would let auto-placement move the centre into the 0px
+      // track. Keep the item and hide its paint instead.
+      if (sidebarCol.style.display === 'none') sidebarCol.style.removeProperty('display')
+      if (sidebarCol.style.visibility !== 'hidden') sidebarCol.style.visibility = 'hidden'
+      if (sidebarCol.style.pointerEvents !== 'none') sidebarCol.style.pointerEvents = 'none'
     }
 
     function attachRailObserver() {
@@ -781,21 +789,22 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       }, h(SidebarGlyph))
     }
 
-    function SidebarRailRow({ t = key => key }) {
-      const enabled = useHideCollapsedRail()
-      return h('div', { className: 'rail-row' },
-        h('div', { className: 'rail-text' },
-          h('div', { className: 'rail-title' }, t('sidebarToggle.title')),
-          h('div', { className: 'rail-desc' }, t('sidebarToggle.desc')),
+    function SidebarSwitchCard({ t = key => key, enabled, onChange }) {
+      return h('div', { className: 'fs-frame' },
+        h('div', { className: 'fs-switchRow' },
+          h('div', { className: 'fs-switchText' },
+            h('h3', { className: 'fs-cardTitle' }, t('sidebarToggle.title')),
+            h('p', { className: 'fs-cardDesc' }, t('sidebarToggle.desc')),
+          ),
+          h('button', {
+            type: 'button',
+            role: 'switch',
+            className: 'fs-switch',
+            'aria-checked': enabled,
+            'aria-label': t('sidebarToggle.title'),
+            onClick: () => { onChange(!enabled) },
+          }, h('span', { className: 'fs-thumb' })),
         ),
-        h('button', {
-          type: 'button',
-          role: 'switch',
-          className: 'rail-switch',
-          'aria-checked': enabled,
-          'aria-label': t('sidebarToggle.title'),
-          onClick: () => { setHideCollapsedRail(!enabled) },
-        }, h('span', { className: 'rail-thumb' })),
       )
     }
 
@@ -814,6 +823,11 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       return h('section', { className: 'fs-section' },
         h('h2', { className: 'fs-title' }, t('title')),
         h('p', { className: 'fs-intro' }, t('intro')),
+        h(SidebarSwitchCard, {
+          t,
+          enabled: snapshot.hideCollapsedRail,
+          onChange: value => { setHideCollapsedRail(value) },
+        }),
         h('div', { className: 'fs-frame' }, ROLES.map(role => h(RoleCard, {
           key: role,
           role,
@@ -866,12 +880,6 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
         })
         applyStyles()
         syncRailFeature()
-        ctx.slots.inject('settings.general.item', () => ctx.slots.register({
-          name: 'settings.general.item',
-          id: 'ds-font-config-sidebar',
-          order: 13,
-          locale: 'ds-font-config',
-        }, SidebarRailRow))
         ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section',
           id: 'ds-font-config',
