@@ -1,12 +1,15 @@
 /**
- * Browser half of ds-font-config: one settings section that owns four
- * typography roles (interface, conversation, artifact preview, monospace) and
- * one injected stylesheet that projects the chosen families, sizes, and line
- * heights onto the live page.
+ * Browser half of ds-font-config: one settings section that owns four local
+ * typography roles (interface, conversation, artifact preview, monospace), one
+ * terminal role backed by the theme service, and one injected stylesheet that
+ * projects the local families, sizes, and line heights onto the live page.
  *
- * The defaults below are applied unless the browser stored a previous choice;
- * an explicitly cleared field emits no CSS and keeps whatever the shipped
- * theme/typography settings currently resolve to.
+ * The local defaults below are applied unless the browser stored a previous
+ * choice; an explicitly cleared field emits no CSS and keeps whatever the
+ * shipped theme/typography settings currently resolve to. The terminal role is
+ * different: the sidebar terminal passes the theme's `terminal` font family and
+ * size straight into xterm, so this page reads and writes that same Host-backed
+ * setting through `ctx.theme` instead of overriding it with CSS.
  */
 window.__ModuleLoader__.load({
   id: 'ds-font-config',
@@ -26,6 +29,12 @@ window.__ModuleLoader__.load({
     const DEFAULT_TEXT_FAMILY = '"Lucida Grande", "STHeiti"'
     const DEFAULT_MONO_FAMILY = '"Monaco"'
     const PREVIEW_SELECTOR = '[data-document-preview], [data-changes-review], [data-changes-hover-preview], [data-presented-file]'
+    /** Theme defaults for the sidebar terminal (empty family = built-in stack). */
+    const TERMINAL_DEFAULT_FAMILY = ''
+    const TERMINAL_DEFAULT_SIZE = 13
+    const TERMINAL_SIZE_LIMITS = { min: 10, max: 20 }
+    /** Stack the terminal appends after a user list; mirrors ui-sidebar-terminal. */
+    const TERMINAL_FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 
     /** CSS-wide generic family keywords, which must stay unquoted. */
     const GENERIC_FAMILIES = new Set([
@@ -37,7 +46,7 @@ window.__ModuleLoader__.load({
       zh: {
         nav: 'UI & 字体',
         title: 'UI & 字体',
-        intro: '界面与字体设置：可隐藏侧栏收起后的左侧细条；默认界面、对话和产物预览为 13px、行距 1.0，等宽为 Monaco 12px、行距 1.2。留空沿用当前设置，修改立即生效并保存在此浏览器。',
+        intro: '界面与字体设置：可隐藏侧栏收起后的左侧细条；默认界面、对话和产物预览为 13px、行距 1.0，等宽为 Monaco 12px、行距 1.2，终端沿用内置等宽字体栈 13px。留空沿用当前设置，修改立即生效并保存在此浏览器；终端字体与字号写入 DSH 设置。',
         'group.ui.title': '界面',
         'group.ui.desc': '应用外壳、侧栏、设置、菜单与按钮等界面文字。',
         'group.chat.title': '对话',
@@ -46,6 +55,8 @@ window.__ModuleLoader__.load({
         'group.preview.desc': '文件预览、变更对比与产物卡片中的正文。',
         'group.mono.title': '等宽',
         'group.mono.desc': '代码块、行内代码、差异对比与纯文本预览。',
+        'group.terminal.title': '终端',
+        'group.terminal.desc': '右侧栏终端中的字符，字体族与字号直接作用于终端模拟器。',
         'field.family': '字体族',
         'field.size': '字号',
         'field.lineHeight': '行距',
@@ -53,6 +64,8 @@ window.__ModuleLoader__.load({
         'placeholder.family.chat': '留空跟随界面字体',
         'placeholder.family.preview': '留空跟随界面字体',
         'placeholder.family.mono': '留空沿用当前等宽字体',
+        'placeholder.family.terminal': '留空使用内置终端字体栈',
+        'terminal.shared': '与「设置 → 通用设置 → 终端字体 / 终端字号」是同一项设置，保存在 DSH 配置中，两处实时同步。',
         preview: '实时预览',
         sample: '字体预览 Aa 0123 — 字号与行距共同决定正文的阅读节奏。The quick brown fox jumps over the lazy dog.',
         saveNote: '设置保存在此浏览器，修改立即生效。',
@@ -66,7 +79,7 @@ window.__ModuleLoader__.load({
       en: {
         nav: 'UI & Fonts',
         title: 'UI & Fonts',
-        intro: 'Interface and typography settings: hide the collapsed sidebar rail; defaults are 13px at 1.0 line height for the interface, conversation, and artifact preview, and Monaco at 12px/1.2 for monospace. Leave a field empty to keep the current setting; changes apply immediately and stay in this browser.',
+        intro: 'Interface and typography settings: hide the collapsed sidebar rail; defaults are 13px at 1.0 line height for the interface, conversation, and artifact preview, Monaco at 12px/1.2 for monospace, and the built-in monospace stack at 13px for the terminal. Leave a field empty to keep the current setting; changes apply immediately and stay in this browser, while the terminal family and size are written to DSH settings.',
         'group.ui.title': 'Interface',
         'group.ui.desc': 'Shell, sidebar, settings, menus, and button text.',
         'group.chat.title': 'Conversation',
@@ -75,6 +88,8 @@ window.__ModuleLoader__.load({
         'group.preview.desc': 'Prose in file previews, change reviews, and presented artifacts.',
         'group.mono.title': 'Monospace',
         'group.mono.desc': 'Code blocks, inline code, diffs, and plain-text previews.',
+        'group.terminal.title': 'Terminal',
+        'group.terminal.desc': 'Characters in the right-sidebar terminal; the family and size go straight into the terminal emulator.',
         'field.family': 'Family',
         'field.size': 'Size',
         'field.lineHeight': 'Line height',
@@ -82,6 +97,8 @@ window.__ModuleLoader__.load({
         'placeholder.family.chat': 'Empty follows the interface font',
         'placeholder.family.preview': 'Empty follows the interface font',
         'placeholder.family.mono': 'Empty keeps the current monospace font',
+        'placeholder.family.terminal': 'Empty uses the built-in terminal stack',
+        'terminal.shared': 'Same setting as Settings → General → Terminal font / Terminal size; it lives in DSH settings and both places stay in sync.',
         preview: 'Live preview',
         sample: 'Font preview Aa 0123 — size and line height shape the reading rhythm. The quick brown fox jumps over the lazy dog.',
         saveNote: 'Saved in this browser and applied immediately.',
@@ -105,6 +122,7 @@ window.__ModuleLoader__.load({
 .fs-cardTitle{margin:0;font-size:14px;line-height:22px;font-weight:500;color:var(--dsw-alias-label-primary)}
 .fs-cardDesc{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
 .fs-controls{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:10px}
+.fs-controls-pair{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
 .fs-field{display:flex;min-width:0;flex-direction:column;gap:6px}
 .fs-label{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
 .fs-inputShell{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;width:100%;height:32px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1)}
@@ -118,6 +136,7 @@ window.__ModuleLoader__.load({
 .fs-sample{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1)}
 .fs-sampleTag{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}
 .fs-sampleText{min-height:2.4em;margin:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary)}
+.fs-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
 .fs-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:2px}
 .fs-note{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
 .fs-reset{box-sizing:border-box;height:28px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:18px;cursor:pointer}
@@ -142,7 +161,7 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
 .rail-reopen{flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
 .rail-reopen:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .rail-reopen:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
-@media (max-width:720px){.fs-controls{grid-template-columns:1fr}.fs-actions{align-items:flex-start;flex-direction:column}}
+@media (max-width:720px){.fs-controls,.fs-controls-pair{grid-template-columns:1fr}.fs-actions{align-items:flex-start;flex-direction:column}}
 `
 
     function defaultState() {
@@ -247,6 +266,8 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
     let state = loadState()
     let styleElement
     let pluginCtx
+    /** Last theme snapshot; the terminal role reads its family/size from here. */
+    let themeSnapshot = null
     let headerButtonDispose
     let railObserver
     let railDiscoveryObserver
@@ -288,10 +309,41 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       const defaults = defaultState()
       // The font page's reset button must not flip the unrelated sidebar switch.
       commitState(Object.assign({}, defaults, { hideCollapsedRail: state.hideCollapsedRail }))
+      // The terminal role lives in the theme service, so reset it through the
+      // same Host-backed write path instead of the local state above.
+      setTerminalFamily(TERMINAL_DEFAULT_FAMILY)
+      setTerminalSize(TERMINAL_DEFAULT_SIZE)
     }
 
     function setHideCollapsedRail(value) {
       commitState(Object.assign({}, state, { hideCollapsedRail: value }))
+    }
+
+    /** Current terminal typography, falling back to the theme defaults. */
+    function terminalTypography() {
+      if (themeSnapshot === null) {
+        return { family: TERMINAL_DEFAULT_FAMILY, size: TERMINAL_DEFAULT_SIZE }
+      }
+      return {
+        family: themeSnapshot.fontFamilies.terminal ?? TERMINAL_DEFAULT_FAMILY,
+        size: themeSnapshot.fontSizes.terminal ?? TERMINAL_DEFAULT_SIZE,
+      }
+    }
+
+    /** Write the terminal font family through the theme service (empty = built-in stack). */
+    function setTerminalFamily(value) {
+      if (pluginCtx === undefined || pluginCtx.theme === undefined) return
+      pluginCtx.theme.setFontFamily('terminal', String(value))
+    }
+
+    /** Write the terminal font size through the theme service, clamped to its accepted range. */
+    function setTerminalSize(value) {
+      if (pluginCtx === undefined || pluginCtx.theme === undefined) return
+      if (value === null || value === undefined || value === '') return
+      const parsed = Number(value)
+      if (!Number.isFinite(parsed)) return
+      pluginCtx.theme.setFontSize('terminal',
+        Math.min(TERMINAL_SIZE_LIMITS.max, Math.max(TERMINAL_SIZE_LIMITS.min, Math.round(parsed))))
     }
 
     /** Locate the app frame through the stable right-sidebar column hook. */
@@ -746,6 +798,54 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       )
     }
 
+    /**
+     * The sidebar terminal reads the theme's terminal family/size directly, so
+     * this card edits that Host-backed setting (no local override) and has no
+     * line-height field: xterm keeps its own row metrics.
+     */
+    function TerminalCard({ t, family, size, editSeq, onFamily, onSize }) {
+      const effectiveFamily = family === '' ? TERMINAL_FONT_STACK : `${family}, ${TERMINAL_FONT_STACK}`
+      const sampleStyle = { fontFamily: effectiveFamily, fontSize: `${size}px`, lineHeight: 1.2 }
+      return h('article', { className: 'fs-role', 'data-font-role': 'terminal' },
+        h('div', { className: 'fs-cardHead' },
+          h('h3', { className: 'fs-cardTitle' }, t('group.terminal.title')),
+          h('p', { className: 'fs-cardDesc' }, t('group.terminal.desc')),
+        ),
+        h('div', { className: 'fs-controls fs-controls-pair' },
+          h('label', { className: 'fs-field', htmlFor: 'fs-terminal-family' },
+            h('span', { className: 'fs-label' }, t('field.family')),
+            h(FamilyInput, {
+              key: `family-terminal-${family}-${editSeq}`,
+              role: 'terminal',
+              value: family,
+              placeholder: t('placeholder.family.terminal'),
+              onCommit: onFamily,
+            }),
+          ),
+          h('label', { className: 'fs-field', htmlFor: 'fs-terminal-size' },
+            h('span', { className: 'fs-label' }, t('field.size')),
+            h(NumberInput, {
+              key: `size-terminal-${size}-${editSeq}`,
+              id: 'fs-terminal-size',
+              value: size,
+              placeholder: String(TERMINAL_DEFAULT_SIZE),
+              min: TERMINAL_SIZE_LIMITS.min,
+              max: TERMINAL_SIZE_LIMITS.max,
+              step: 1,
+              integer: true,
+              unit: t('unit'),
+              onCommit: onSize,
+            }),
+          ),
+        ),
+        h('div', { className: 'fs-sample' },
+          h('span', { className: 'fs-sampleTag' }, t('preview')),
+          h('p', { className: 'fs-sampleText', style: sampleStyle }, t('sample')),
+        ),
+        h('p', { className: 'fs-hint' }, t('terminal.shared')),
+      )
+    }
+
     function useHideCollapsedRail() {
       const [enabled, setEnabled] = React.useState(state.hideCollapsedRail)
       React.useEffect(() => {
@@ -810,16 +910,25 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
 
     function FontsSection({ t = key => key }) {
       const [snapshot, setSnapshot] = React.useState(state)
+      // Terminal writes change the theme snapshot, not the local state object,
+      // so a same-reference setSnapshot would bail out and leave the card stale.
+      const [, bump] = React.useReducer(value => value + 1, 0)
+      // A commit that clamps to the current value produces no theme change, so
+      // the card also remounts its inputs after every terminal edit.
+      const [terminalEditSeq, setTerminalEditSeq] = React.useState(0)
       React.useEffect(() => {
-        const listener = () => { setSnapshot(state) }
+        const listener = () => { setSnapshot(state); bump() }
         listeners.add(listener)
         return () => { listeners.delete(listener) }
       }, [])
       const effective = effectiveValues()
       const defaults = defaultState()
+      const terminal = terminalTypography()
       const pristine = ROLES.every(role => snapshot[role].family === defaults[role].family
         && snapshot[role].size === defaults[role].size
         && snapshot[role].lineHeight === defaults[role].lineHeight)
+        && terminal.family === TERMINAL_DEFAULT_FAMILY
+        && terminal.size === TERMINAL_DEFAULT_SIZE
       return h('section', { className: 'fs-section' },
         h('h2', { className: 'fs-title' }, t('title')),
         h('p', { className: 'fs-intro' }, t('intro')),
@@ -837,7 +946,15 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
           onFamily: value => { setField(role, { family: value }) },
           onSize: value => { setField(role, { size: value }) },
           onLineHeight: value => { setField(role, { lineHeight: value }) },
-        }))),
+        })), h(TerminalCard, {
+          key: 'terminal',
+          t,
+          family: terminal.family,
+          size: terminal.size,
+          editSeq: terminalEditSeq,
+          onFamily: value => { setTerminalFamily(value); setTerminalEditSeq(value => value + 1) },
+          onSize: value => { setTerminalSize(value); setTerminalEditSeq(value => value + 1) },
+        })),
         h('div', { className: 'fs-actions' },
           h('span', { className: 'fs-note' }, t('saveNote')),
           h('button', {
@@ -851,9 +968,18 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
     }
 
     return {
-      inject: ['slots', 'locale', 'layout'],
+      inject: ['slots', 'locale', 'layout', 'theme'],
       apply(ctx) {
         pluginCtx = ctx
+        ctx.effect(() => {
+          themeSnapshot = ctx.theme.getTheme()
+          const off = ctx.on('theme/change', (next) => {
+            themeSnapshot = next
+            emit()
+          })
+          emit()
+          return () => { off() }
+        }, 'ds-font-config: theme sync')
         ctx.effect(() => {
           try {
             return ctx.locale.register('ds-font-config', DICTIONARIES)

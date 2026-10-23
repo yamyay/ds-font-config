@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "UI & Fonts",
-    "description": "Typography and sidebar layout settings for DeepSeek Harness: per-surface font family, size, and line height, plus an optional rail-hiding collapsed sidebar."
+    "description": "Typography and sidebar layout settings for DeepSeek Harness: per-surface font family, size, and line height, sidebar-terminal font settings, plus an optional rail-hiding collapsed sidebar."
   }
 }

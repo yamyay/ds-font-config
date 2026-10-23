@@ -1,9 +1,9 @@
 {
   "name": "ds-font-config",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Typography and sidebar layout settings for DeepSeek Harness: per-surface font family, size, and line height, plus an optional rail-hiding collapsed sidebar.",
+  "description": "Typography and sidebar layout settings for DeepSeek Harness: per-surface font family, size, and line height, sidebar-terminal typography, plus an optional rail-hiding collapsed sidebar.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/yamyay/ds-font-config.git"
@@ -29,7 +29,8 @@
       "immediately": true,
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-theme"
       ]
     }
   }
