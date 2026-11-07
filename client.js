@@ -157,6 +157,10 @@ window.__ModuleLoader__.load({
 /* Title-bar expand control, mounted only while the sidebar is collapsed. */
 [data-ds-rail-reopen]{display:none}
 [data-sidebar-collapsed] [data-ds-rail-reopen]{display:inline-flex}
+/* Drawer mode (viewport < SIDEBAR_DRAWER_BREAKPOINT) already keeps the native
+   opener in the frame's shell.leading seat and closes through the mask; the
+   header control is rail-collapse-only and must not stack next to it. */
+[data-sidebar-drawer] [data-ds-rail-reopen]{display:none!important}
 html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [data-ds-rail-reopen]{display:none!important}
 .rail-reopen{flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
 .rail-reopen:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
@@ -383,6 +387,10 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       if (!state.hideCollapsedRail) return
       const frame = findAppFrame()
       if (frame === null) return
+      // Drawer mode has no rail to hide: the sidebar is an absolute overlay the
+      // native opener + mask drive, and the frame's first track is already 0.
+      // Keep the plugin from touching grid tracks or the column here.
+      if (frame.hasAttribute('data-sidebar-drawer')) { restoreRail(); return }
       if (!frame.hasAttribute('data-sidebar-collapsed')) {
         restoreRail()
         return

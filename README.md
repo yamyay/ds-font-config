@@ -10,7 +10,7 @@ Typography and sidebar layout settings for **DeepSeek Harness** (DSH). It adds a
 - Empty fields keep the current/theme value instead of forcing an override.
 - "Restore defaults" returns to the values below, including the terminal role.
 - **Hide the collapsed sidebar rail** (on by default): when enabled and the sidebar is collapsed, the 56px left rail and its grid track are removed, and a sidebar button appears at the left of the conversation title bar to reopen it. The switch lives at the top of **Settings → UI & Fonts**.
-- The title-bar button is hidden on Desktop platforms that already provide a window-chrome sidebar control.
+- The title-bar button is hidden on Desktop platforms that already provide a window-chrome sidebar control, and in drawer mode (viewport below the 768px sidebar-drawer breakpoint): there the frame shows its own opener in the shell-leading seat, so a second stacked button would duplicate it.
 
 ## Defaults
 
@@ -46,4 +46,4 @@ The bundle has no build step:
 - `locale/*.json` — Plugin Manager display metadata.
 - `icon.svg` — plugin icon.
 
-Version 0.2.0.
+Version 0.2.1 — 2026-11-07: the rail-hiding title-bar button no longer renders in drawer mode, where the native opener already provides the toggle; the rail-collapse grid override also stays off on drawer frames.
