@@ -636,11 +636,17 @@ body[data-composer-expanded] [data-composer-card] > [data-input-scroll]{flex:1 1
     function onComposerKeydownCapture(event) {
       if (!composerExpanded) return
       if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return
-      if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.shiftKey || event.altKey) return
       const target = event.target
       if (!(target instanceof HTMLElement)) return
       const editor = target.closest(COMPOSER_INPUT_SELECTOR)
       if (editor === null) return
+      // Ctrl/Cmd+Enter is the composer's accelerated submit even while the
+      // draft is expanded: let it through, then dock the card again.
+      if (event.ctrlKey || event.metaKey) {
+        setTimeout(() => { setComposerExpanded(false) }, 0)
+        return
+      }
       // Keep the composer's own Enter (send) out of the loop, then let Lexical
       // insert the break through its editing pipeline.
       event.preventDefault()

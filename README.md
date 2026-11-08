@@ -47,6 +47,8 @@ The bundle has no build step:
 - `locale/*.json` — Plugin Manager display metadata.
 - `icon.svg` — plugin icon.
 
+Version 0.3.1 — 2026-11-08: an expanded draft also docks again after the Ctrl/Cmd+Enter submit shortcut.
+
 Version 0.3.0 — 2026-11-08: added the expand-draft control between "+" and the permission select; expanded drafts break on Enter and submit only through the send control.
 
 Version 0.2.2 — 2026-11-08: the rail-collapse sync falls back to a timer when `requestAnimationFrame` does not run (hidden or background tab), so collapsing there no longer leaves the rail visible; injected font stacks read each host font token once, so the monospace list and scoped overrides no longer repeat families.
