@@ -35,6 +35,28 @@ window.__ModuleLoader__.load({
     const TERMINAL_SIZE_LIMITS = { min: 10, max: 20 }
     /** Stack the terminal appends after a user list; mirrors ui-sidebar-terminal. */
     const TERMINAL_FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+    /** The sidebar-foot account trigger's stock "more" glyph, replaced by the gear. */
+    const MORE_ICON_STOCK = '#dsw-icon-ellipsis-outline-medium'
+    const MORE_ICON_GEAR = '#dsw-icon-settings-outline-regular'
+    /** The shipped trigger row that owns the glyph (settings.launcher content). */
+    const MORE_TRIGGER_SELECTOR = '[data-slot="settings.launcher"] button'
+    /** Panels row icon that identifies the plugins entry in the shell's nav. */
+    const PLUGIN_PANEL_ICON = '#dsw-icon-plugin-pinwheel-outline-regular'
+    /** Session-scoped memory of the model provider the composer last showed. */
+    const PROVIDER_STORE_KEY = 'ds-font-config.provider'
+    /** Account-menu row icon that identifies the sidebar-foot menu. */
+    const ACCOUNT_MENU_ICON = '#dsw-icon-settings-outline-medium'
+    /** OpenCode Go usage bridge served by the Host half of this package. */
+    const QUOTA_ENDPOINT = '/api/ds-font-config/opencode-usage'
+    const QUOTA_PROVIDER = 'opencode-go'
+    /** Quiet time after the last DOM change of a turn before the readout reloads. */
+    const QUOTA_SETTLE_MS = 2500
+    /** Follow-up repaints covering a model label that mounts after the read. */
+    const QUOTA_REPAINT_MS = [250, 1200]
+    /** Ignore the mutations our own readout write causes. */
+    const QUOTA_MUTE_MS = 600
+    /** Floor between reads, so a chatty page cannot turn the readout into a poll. */
+    const QUOTA_MIN_INTERVAL_MS = 8000
 
     /** CSS-wide generic family keywords, which must stay unquoted. */
     const GENERIC_FAMILIES = new Set([
@@ -77,6 +99,8 @@ window.__ModuleLoader__.load({
         'sidebarToggle.open': '展开侧边栏',
         'compose.expand': '放大输入框',
         'compose.collapse': '缩小输入框',
+        'quota.title': 'OpenCode Go 用量：5 小时 / 本周 / 本月，每轮消息结束后刷新',
+        'menu.plugins': '插件',
       },
       en: {
         nav: 'UI & Fonts',
@@ -112,6 +136,8 @@ window.__ModuleLoader__.load({
         'sidebarToggle.open': 'Expand sidebar',
         'compose.expand': 'Expand the draft',
         'compose.collapse': 'Shrink the draft',
+        'quota.title': 'OpenCode Go usage: 5-hour / weekly / monthly, refreshed after each turn',
+        'menu.plugins': 'Plugins',
       },
     }
 
@@ -179,6 +205,9 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
    scrollport takes the height above the tool row; the send control stays. */
 body[data-composer-expanded] [data-composer-card]{height:var(--dsg-composer-expanded-height)}
 body[data-composer-expanded] [data-composer-card] > [data-input-scroll]{flex:1 1 auto;max-height:none;min-height:0}
+/* OpenCode Go usage readout, in place of the sidebar-foot account caption. */
+.ds-quota{margin-left:2px;font-size:12px;line-height:1;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;white-space:nowrap}
+[data-sidebar-collapsed] .ds-quota{display:none}
 `
 
     function defaultState() {
@@ -533,6 +562,19 @@ body[data-composer-expanded] [data-composer-card] > [data-input-scroll]{flex:1 1
     let composerObserver
     let composerSyncScheduled = false
 
+    /** Last OpenCode Go windows read through the Host bridge, or null. */
+    let quotaUsage = null
+    /** Let the next turn repaint even when the numbers did not change. */
+    let quotaSettleTimer
+    /** Guards against overlapping reads on rapid turn boundaries. */
+    let quotaFetching = false
+    /** Pending follow-up repaints, so an unload leaves no timers behind. */
+    let quotaRepaintTimers = []
+    /** Mutations before this instant belong to our own readout write. */
+    let quotaMutedUntil = 0
+    /** Start of the last read, enforcing the minimum interval. */
+    let quotaLastReadAt = 0
+
     function findComposerCard() {
       return document.querySelector(COMPOSER_CARD_SELECTOR)
     }
@@ -720,13 +762,25 @@ body[data-composer-expanded] [data-composer-card] > [data-input-scroll]{flex:1 1
       // Still mounted in the right seat? React may insert new siblings around
       // the row; re-anchor when the control drifted away from the mode group.
       if (composerButton !== undefined && composerButton.parentElement === tools
-        && (modes === null || composerButton.nextElementSibling === modes)) return
+        && (modes === null || composerButton.nextElementSibling === modes)
+        && document.querySelectorAll('.ds-compose-expand').length === 1) return
       removeComposerButton()
       composerButton = createComposerButton()
       // Between "+" and the permission/plan select; an absent group (the hero
       // draft has no permission picker) simply puts the control after "+".
       tools.insertBefore(composerButton, modes)
+      // A hot reload can leave the previous generation's control behind: its
+      // teardown may run after this mount, or never if the tab was unloaded.
+      removeStrayComposerButtons()
       updateComposerButton()
+    }
+
+    /** Drop expand controls this generation does not own. */
+    function removeStrayComposerButtons() {
+      if (typeof document === 'undefined') return
+      for (const stray of document.querySelectorAll('.ds-compose-expand')) {
+        if (stray !== composerButton) stray.remove()
+      }
     }
 
     /** Re-mount after the composer is rebuilt (session/view switches). */
@@ -736,6 +790,14 @@ body[data-composer-expanded] [data-composer-card] > [data-input-scroll]{flex:1 1
       setTimeout(() => {
         composerSyncScheduled = false
         syncComposerFeature()
+        // The same body-level pass keeps the two shell decorations current:
+        // React rebuilds the sidebar "more" trigger and the model label for
+        // reasons the composer sync never sees.
+        applyMoreIcon()
+        renderQuota()
+        syncSidebarMenu()
+        syncMenuEntries()
+        scheduleQuotaRefresh()
       }, 0)
     }
 
@@ -755,7 +817,327 @@ body[data-composer-expanded] [data-composer-card] > [data-input-scroll]{flex:1 1
     function restoreComposer() {
       setComposerExpanded(false)
       removeComposerButton()
+      removeStrayComposerButtons()
       stopComposerObserver()
+    }
+
+    /**
+     * Swap the sidebar-foot account trigger's ellipsis for the gear mark. That
+     * trigger is shell chrome supplied through `settings.launcher`, so the swap
+     * rides on the DOM and the shell observer re-applies it whenever React
+     * rebuilds the button. The `data-ds-more-gear` mark keeps the restore from
+     * touching the gear the settings trigger legitimately owns.
+     */
+    function applyMoreIcon() {
+      if (typeof document === 'undefined') return
+      for (const trigger of document.querySelectorAll(MORE_TRIGGER_SELECTOR)) {
+        const icon = trigger.querySelector(`use[href="${MORE_ICON_STOCK}"]`)
+        if (icon === null) continue
+        icon.setAttribute('href', MORE_ICON_GEAR)
+        icon.setAttribute('data-ds-more-gear', '')
+      }
+    }
+
+    /** "5h:12% w:34% m:56%", or null while no window is known. */
+    function quotaText() {
+      if (quotaUsage === null || typeof quotaUsage !== 'object') return null
+      const parts = []
+      for (const [key, label] of [['rolling', '5h'], ['weekly', 'w'], ['monthly', 'm']]) {
+        const window = quotaUsage[key]
+        if (window === null || typeof window !== 'object') continue
+        const percent = Number(window.percent)
+        if (!Number.isFinite(percent)) continue
+        parts.push(`${label}:${Math.round(Math.min(100, Math.max(0, percent)))}%`)
+      }
+      return parts.length === 0 ? null : parts.join(' ')
+    }
+
+    /** Last provider the composer showed, kept while another panel is open. */
+    let lastModelProvider = null
+
+    /** Read the provider this tab last saw, surviving panel and page switches. */
+    function rememberedProvider() {
+      if (lastModelProvider !== null) return lastModelProvider
+      try {
+        return typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(PROVIDER_STORE_KEY)
+      } catch {
+        return null
+      }
+    }
+
+    /** Record the provider so a panel without a composer keeps the readout. */
+    function rememberProvider(id) {
+      lastModelProvider = id
+      try {
+        if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(PROVIDER_STORE_KEY, id)
+      } catch {
+        // Private-mode storage denial only costs the cross-panel readout.
+      }
+    }
+
+    /** Provider id of the model the composer currently shows. */
+    function currentModelProvider() {
+      const card = document.querySelector('[data-composer-card]')
+      // Panels other than the conversation have no composer; the readout is
+      // account state, so it keeps reporting the last model the user chose.
+      if (card === null) return rememberedProvider()
+      for (const label of card.querySelectorAll('[data-provider-id][data-model-id]')) {
+        // Menu rows carry the same attributes; only the trigger sits inside the
+        // composer's own popup button, so the readout never follows a hovered
+        // row of some other provider.
+        if (label.closest('button[aria-haspopup]') !== null) {
+          const id = label.getAttribute('data-provider-id')
+          rememberProvider(id)
+          return id
+        }
+      }
+      return rememberedProvider()
+    }
+
+    /**
+     * Paint the readout into the sidebar-foot account trigger, in place of its
+     * "more" caption: the trigger becomes gear + numbers. The numbers belong to
+     * the OpenCode Go account, so they show only while that provider's model is
+     * selected, and the caption never returns — a gear with no numbers is the
+     * whole trigger otherwise.
+     */
+    function renderQuota() {
+      if (typeof document === 'undefined') return
+      const trigger = document.querySelector(MORE_TRIGGER_SELECTOR)
+      if (trigger === null) return
+      let touched = false
+      for (const caption of trigger.querySelectorAll(':scope > span:not(.ds-quota)')) {
+        if (caption.style.display !== 'none') {
+          caption.style.display = 'none'
+          touched = true
+        }
+      }
+      const shown = trigger.querySelector('.ds-quota')
+      const extra = trigger.querySelectorAll('.ds-quota')
+      for (let index = 1; index < extra.length; index += 1) {
+        extra[index].remove()
+        touched = true
+      }
+      // An unknown provider (no composer yet, nothing remembered) still shows:
+      // only a profile with the OpenCode Go key ever gets numbers back, so the
+      // fallback cannot decorate someone else's account.
+      const provider = currentModelProvider()
+      const text = provider === null || provider === QUOTA_PROVIDER ? quotaText() : null
+      if (text === null) {
+        if (shown !== null) {
+          shown.remove()
+          touched = true
+        }
+      } else {
+        let badge = shown
+        if (badge === null) {
+          badge = document.createElement('span')
+          badge.className = 'ds-quota'
+          trigger.appendChild(badge)
+          touched = true
+        }
+        if (badge.textContent !== text) {
+          badge.textContent = text
+          touched = true
+        }
+        const title = quotaTitle()
+        if (badge.title !== title) {
+          badge.title = title
+          touched = true
+        }
+      }
+      // Writing the readout is itself a DOM mutation; without this mark the
+      // settle timer would see it, refetch, rewrite, and loop on a timer.
+      if (touched) quotaMutedUntil = Date.now() + QUOTA_MUTE_MS
+    }
+
+    /** Localized tooltip naming the three windows behind the readout. */
+    function quotaTitle() {
+      const t = pluginCtx === undefined ? null : pluginCtx.locale.bind('ds-font-config')
+      return t === null ? '' : t('quota.title')
+    }
+
+    /**
+     * Read the Host bridge once. The read is fire-and-forget: nothing in the
+     * conversation waits on it, and a failed read keeps the previous numbers
+     * instead of blanking the trigger.
+     * @param force - Read even inside the minimum interval (an explicit click).
+     */
+    async function refreshQuota(force = false) {
+      if (typeof fetch !== 'function' || quotaFetching) return
+      const now = Date.now()
+      if (!force && quotaLastReadAt !== 0 && now - quotaLastReadAt < QUOTA_MIN_INTERVAL_MS) return
+      quotaLastReadAt = now
+      quotaFetching = true
+      try {
+        const response = await fetch(QUOTA_ENDPOINT, {
+          headers: { accept: 'application/json' },
+          cache: 'no-store',
+        })
+        const payload = await response.json().catch(() => null)
+        const usage = payload !== null && typeof payload === 'object' ? payload.usage : null
+        quotaUsage = usage !== null && typeof usage === 'object' ? usage : null
+      } catch {
+        quotaUsage = null
+      } finally {
+        quotaFetching = false
+        renderQuota()
+        // The composer's model label mounts after the catalog loads, which can
+        // land after this read: repaint a couple of times instead of waiting
+        // for an unrelated mutation to wake the shell observer.
+        for (const delay of QUOTA_REPAINT_MS) {
+          quotaRepaintTimers.push(setTimeout(renderQuota, delay))
+        }
+      }
+    }
+
+    /**
+     * A turn ends when the conversation stops changing, so the readout reloads
+     * on the quiet tail of one message rather than on a clock: every mutation
+     * restarts the timer, and only a settled page reaches the refresh.
+     */
+    function scheduleQuotaRefresh() {
+      if (typeof setTimeout !== 'function') return
+      if (Date.now() < quotaMutedUntil) return
+      if (quotaSettleTimer !== undefined) clearTimeout(quotaSettleTimer)
+      quotaSettleTimer = setTimeout(() => {
+        quotaSettleTimer = undefined
+        void refreshQuota()
+      }, QUOTA_SETTLE_MS)
+    }
+
+    /**
+     * Reduce the sidebar navigation to the seats the layout keeps — new session,
+     * the fixed automation row, and the workspace list. The panels nav rows move
+     * into the sidebar-foot menu below, which is why the More launcher goes too:
+     * with nothing unpinned it would open an empty list.
+     */
+    function syncSidebarMenu() {
+      if (typeof document === 'undefined') return
+      const icon = document.querySelector(`[data-slot="sidebar.panellist"] use[href="${PLUGIN_PANEL_ICON}"]`)
+      if (icon === null) return
+      const row = icon.closest('button')
+      const entry = row === null ? null : row.parentElement
+      if (entry !== null && entry.style.display !== 'none') entry.style.display = 'none'
+      const nav = icon.closest('nav')
+      const more = nav === null ? null : nav.querySelector('button[aria-haspopup="menu"]')
+      const anchor = more === null ? null : more.parentElement
+      if (anchor !== null) {
+        // The More launcher is the only way back to an entry the user unpinned,
+        // and the shell drops that row from the nav entirely. So it stays hidden
+        // only while another panel row is still there to reach.
+        const rows = [...nav.querySelectorAll(':scope > div')]
+          .filter(candidate => candidate.querySelector('button[aria-label]') !== null)
+        const others = rows.filter(candidate => candidate !== entry)
+        const wanted = others.length === 0 ? '' : 'none'
+        if (anchor.style.display !== wanted) anchor.style.display = wanted
+      }
+      // The brand row already opens a session, so the full-width new-session
+      // card below it only costs height.
+      const brand = document.querySelector('[data-slot="sidebar.brand.mark"]')
+      const brandRow = brand === null ? null : brand.closest('button')?.parentElement
+      const newSession = brandRow === null || brandRow === undefined ? null : brandRow.nextElementSibling
+      if (newSession instanceof HTMLElement && newSession.tagName === 'BUTTON'
+        && newSession.style.display !== 'none') {
+        newSession.style.display = 'none'
+      }
+    }
+
+    /** Close the portalled menu the shell rendered for the footer trigger. */
+    function dismissAccountMenu() {
+      if (typeof document === 'undefined') return
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true,
+      }))
+    }
+
+    /**
+     * Add the plugins row to the sidebar-foot menu. The row is cloned from a
+     * shipped one so it inherits the menu's own geometry and hover treatment,
+     * then retargeted: plugin glyph, localized label, plugin panel on click.
+     */
+    function injectPluginsMenuEntry(menu) {
+      if (menu.querySelector('[data-ds-menu-plugins]') !== null) return
+      const template = menu.querySelector('button[role="menuitem"]')
+      if (template === null) return
+      const wrap = template.parentElement
+      const list = wrap === null ? null : wrap.parentElement
+      if (list === null) return
+      const clone = wrap.cloneNode(true)
+      clone.setAttribute('data-ds-menu-plugins', '')
+      const item = clone.querySelector('button')
+      const spans = item === null ? [] : [...item.querySelectorAll('span')]
+      if (item !== null && spans.length >= 2) {
+        spans[0].innerHTML = `<svg width="16" height="16" aria-hidden="true"><use href="${PLUGIN_PANEL_ICON}"></use></svg>`
+        spans[1].textContent = menuLabel('menu.plugins', 'Plugins')
+        // The shipped first row carries a shortcut chip; this one has none.
+        for (const extra of spans.slice(2)) extra.remove()
+        item.addEventListener('click', () => {
+          if (pluginCtx !== undefined) pluginCtx.layout.selectPanel('plugins')
+          dismissAccountMenu()
+        })
+        list.appendChild(clone)
+      }
+    }
+
+    /** Repaint every open account menu (React rebuilds them on each open). */
+    function syncMenuEntries() {
+      if (typeof document === 'undefined') return
+      for (const menu of document.querySelectorAll('[role="menu"]')) {
+        if (menu.querySelector(`use[href="${ACCOUNT_MENU_ICON}"]`) === null) continue
+        injectPluginsMenuEntry(menu)
+      }
+    }
+
+    /** Localized copy with an English fallback for a locale mid-registration. */
+    function menuLabel(key, fallback) {
+      if (pluginCtx === undefined) return fallback
+      try {
+        return pluginCtx.locale.bind('ds-font-config')(key)
+      } catch {
+        return fallback
+      }
+    }
+
+    /** Drop the decorations and the pending read when the plugin unloads. */
+    function restoreShellExtras() {
+      if (quotaSettleTimer !== undefined) clearTimeout(quotaSettleTimer)
+      quotaSettleTimer = undefined
+      for (const timer of quotaRepaintTimers) clearTimeout(timer)
+      quotaRepaintTimers = []
+      if (typeof document === 'undefined') return
+      for (const badge of document.querySelectorAll('.ds-quota')) badge.remove()
+      for (const caption of document.querySelectorAll(`${MORE_TRIGGER_SELECTOR} > span`)) {
+        caption.style.removeProperty('display')
+      }
+      for (const icon of document.querySelectorAll('use[data-ds-more-gear]')) {
+        icon.setAttribute('href', MORE_ICON_STOCK)
+        icon.removeAttribute('data-ds-more-gear')
+      }
+      for (const injected of document.querySelectorAll('[data-ds-menu-plugins]')) injected.remove()
+      for (const icon of document.querySelectorAll(`[data-slot="sidebar.panellist"] use[href="${PLUGIN_PANEL_ICON}"]`)) {
+        const entry = icon.closest('button')?.parentElement
+        if (entry !== null && entry !== undefined) entry.style.removeProperty('display')
+        const more = icon.closest('nav')?.querySelector('button[aria-haspopup="menu"]')
+        if (more !== null && more !== undefined) more.parentElement?.style.removeProperty('display')
+      }
+      for (const brand of document.querySelectorAll('[data-slot="sidebar.brand.mark"]')) {
+        const row = brand.closest('button')?.parentElement
+        const next = row === undefined || row === null ? null : row.nextElementSibling
+        if (next instanceof HTMLElement && next.tagName === 'BUTTON') next.style.removeProperty('display')
+      }
+    }
+
+    /**
+     * A click on the footer trigger refreshes the readout as it opens the menu:
+     * the numbers are account state, and that trigger is the one place the user
+     * can ask for them again without waiting for a turn to end.
+     */
+    function onQuotaClick(event) {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest(MORE_TRIGGER_SELECTOR) === null) return
+      void refreshQuota(true)
     }
 
     function px(value) {
@@ -1288,11 +1670,22 @@ body[data-composer-expanded] [data-composer-card] > [data-input-scroll]{flex:1 1
           }
         })
         ctx.effect(() => () => { restoreComposer() })
+        ctx.effect(() => () => { restoreShellExtras() })
+        ctx.effect(() => {
+          if (typeof document === 'undefined') return () => {}
+          document.addEventListener('click', onQuotaClick, true)
+          return () => { document.removeEventListener('click', onQuotaClick, true) }
+        }, 'ds-font-config: quota click')
         ctx.effect(() => ctx.locale.subscribe(updateComposerButton), 'ds-font-config: composer labels')
         applyStyles()
         syncRailFeature()
         syncComposerFeature()
         attachComposerObserver()
+        applyMoreIcon()
+        renderQuota()
+        syncSidebarMenu()
+        syncMenuEntries()
+        void refreshQuota()
         ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section',
           id: 'ds-font-config',
