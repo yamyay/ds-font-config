@@ -11,6 +11,7 @@ Typography and sidebar layout settings for **DeepSeek Harness** (DSH). It adds a
 - "Restore defaults" returns to the values below, including the terminal role.
 - **Hide the collapsed sidebar rail** (on by default): when enabled and the sidebar is collapsed, the 56px left rail and its grid track are removed, and a sidebar button appears at the left of the conversation title bar to reopen it. The switch lives at the top of **Settings → UI & Fonts**.
 - The title-bar button is hidden on Desktop platforms that already provide a window-chrome sidebar control, and in drawer mode (viewport below the 768px sidebar-drawer breakpoint): there the frame shows its own opener in the shell-leading seat, so a second stacked button would duplicate it.
+- **Expand draft**: a control between the "+" button and the permission select (or right after "+" when the hero draft has no permission picker) grows the draft card to the conversation viewport. While expanded, plain Enter inserts a line break regardless of the composer's Enter preference, and only the send control submits; the control turns into a shrink icon that restores the original height and Enter behavior without touching the draft text; submitting a prompt restores the docked draft automatically.
 
 ## Defaults
 
@@ -45,6 +46,8 @@ The bundle has no build step:
 - `cordis.patch.yml` — inserts the bundle row.
 - `locale/*.json` — Plugin Manager display metadata.
 - `icon.svg` — plugin icon.
+
+Version 0.3.0 — 2026-11-08: added the expand-draft control between "+" and the permission select; expanded drafts break on Enter and submit only through the send control.
 
 Version 0.2.2 — 2026-11-08: the rail-collapse sync falls back to a timer when `requestAnimationFrame` does not run (hidden or background tab), so collapsing there no longer leaves the rail visible; injected font stacks read each host font token once, so the monospace list and scoped overrides no longer repeat families.
 

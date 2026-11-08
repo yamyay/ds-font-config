@@ -75,6 +75,8 @@ window.__ModuleLoader__.load({
         'sidebarToggle.title': '收起侧栏时隐藏左侧细条',
         'sidebarToggle.desc': '侧栏收起后隐藏左侧栏，只在对话标题栏左侧显示一个展开按钮。',
         'sidebarToggle.open': '展开侧边栏',
+        'compose.expand': '放大输入框',
+        'compose.collapse': '缩小输入框',
       },
       en: {
         nav: 'UI & Fonts',
@@ -108,6 +110,8 @@ window.__ModuleLoader__.load({
         'sidebarToggle.title': 'Hide the collapsed sidebar rail',
         'sidebarToggle.desc': 'When the sidebar is collapsed, hide the left rail and show an expand button at the start of the conversation title bar.',
         'sidebarToggle.open': 'Expand sidebar',
+        'compose.expand': 'Expand the draft',
+        'compose.collapse': 'Shrink the draft',
       },
     }
 
@@ -166,6 +170,15 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
 .rail-reopen:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .rail-reopen:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
 @media (max-width:720px){.fs-controls,.fs-controls-pair{grid-template-columns:1fr}.fs-actions{align-items:flex-start;flex-direction:column}}
+/* Draft expand control between the "+" button and the permission select. */
+.ds-compose-expand{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:0;border:none;border-radius:999px;corner-shape:round;background:var(--dsw-specific-selector);color:var(--dsw-alias-label-primary);cursor:pointer}
+@media (hover:hover){.ds-compose-expand:hover{background:var(--dsw-alias-interactive-bg-hover-solid)}}
+.ds-compose-expand[aria-pressed='true']{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-state-business-primary)}
+.ds-compose-expand:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+/* Expanded draft: the card fills the conversation viewport and the draft
+   scrollport takes the height above the tool row; the send control stays. */
+body[data-composer-expanded] [data-composer-card]{height:var(--dsg-composer-expanded-height)}
+body[data-composer-expanded] [data-composer-card] > [data-input-scroll]{flex:1 1 auto;max-height:none;min-height:0}
 `
 
     function defaultState() {
@@ -500,6 +513,243 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
         stopRailObserver()
         restoreRail()
       }
+    }
+
+    // ---- Composer expand: a draft maximized to the conversation viewport ----
+
+    const COMPOSER_CARD_SELECTOR = '[data-composer-card]'
+    const COMPOSER_INPUT_SELECTOR = '[data-composer-input]'
+    const COMPOSER_EXPANDED_ATTRIBUTE = 'data-composer-expanded'
+    const COMPOSER_HEIGHT_VARIABLE = '--dsg-composer-expanded-height'
+    /** Breathing room between the expanded card's top stroke and the header. */
+    const COMPOSER_EXPANDED_TOP_GAP = 3
+    /** Four corner arrows: pointing out to expand, pointing in to restore. */
+    const COMPOSER_EXPAND_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2H3.2A1.2 1.2 0 0 0 2 3.2V6"/><path d="M10 2h2.8A1.2 1.2 0 0 1 14 3.2V6"/><path d="M6 14H3.2A1.2 1.2 0 0 1 2 12.8V10"/><path d="M10 14h2.8a1.2 1.2 0 0 0 1.2-1.2V10"/></svg>'
+    const COMPOSER_RESTORE_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6h4V2"/><path d="M14 6h-4V2"/><path d="M2 10h4v4"/><path d="M14 10h-4v4"/></svg>'
+
+    /** The button injected between the "+" control and the permission select. */
+    let composerButton
+    let composerExpanded = false
+    let composerObserver
+    let composerSyncScheduled = false
+
+    function findComposerCard() {
+      return document.querySelector(COMPOSER_CARD_SELECTOR)
+    }
+
+    /**
+     * The toolbar row is the card's last element child that holds buttons; its
+     * first DIV child is the permission/plan group (the "+" button and the
+     * hidden file input come before it).
+     */
+    function findComposerRow(card) {
+      return [...card.children].reverse().find(element => element.querySelector('button') !== null) ?? null
+    }
+
+    function findComposerTools(card) {
+      const row = findComposerRow(card)
+      if (row === null) return null
+      const tools = [...row.children].find(element => element.tagName === 'DIV')
+      return tools ?? null
+    }
+
+    /** The permission/plan container inside the toolbar row. */
+    function findComposerModes(tools) {
+      return [...tools.children].find(element => element.tagName === 'DIV') ?? null
+    }
+
+    /**
+     * The trailing send control: the last button of the row's trailing group.
+     * While a Turn runs the same seat holds the stop button (square glyph), so
+     * a rect glyph means this click is not a submission.
+     */
+    function findComposerSendButton(card) {
+      const row = findComposerRow(card)
+      if (row === null) return null
+      const trailing = [...row.children].reverse().find(element => element.tagName === 'DIV')
+      if (trailing === undefined) return null
+      const buttons = [...trailing.querySelectorAll('button')]
+      const last = buttons[buttons.length - 1]
+      if (last === undefined || last.querySelector('svg rect') !== null) return null
+      return last
+    }
+
+    /** The nearest scrolling ancestor of the card (the conversation viewport). */
+    function findComposerScrollBody(card) {
+      let element = card.parentElement
+      while (element !== null && element !== document.body) {
+        const style = getComputedStyle(element)
+        if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && element.clientHeight > 0) return element
+        element = element.parentElement
+      }
+      return null
+    }
+
+    function createComposerButton() {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'ds-compose-expand'
+      button.dataset.dsComposeExpand = ''
+      // The draft keeps focus: mousedown must not move the caret out of the
+      // editor (the same contract as the shipped "+" control).
+      button.addEventListener('mousedown', event => { event.preventDefault() })
+      button.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setComposerExpanded(!composerExpanded)
+      })
+      return button
+    }
+
+    function updateComposerButton() {
+      if (composerButton === undefined) return
+      const t = pluginCtx === undefined ? key => key : pluginCtx.locale.bind('ds-font-config')
+      const label = composerExpanded ? t('compose.collapse') : t('compose.expand')
+      composerButton.setAttribute('aria-label', label)
+      composerButton.title = label
+      composerButton.setAttribute('aria-pressed', composerExpanded ? 'true' : 'false')
+      composerButton.innerHTML = composerExpanded ? COMPOSER_RESTORE_ICON : COMPOSER_EXPAND_ICON
+    }
+
+    /** Make the card as tall as the conversation viewport above its own seat. */
+    function applyComposerHeight() {
+      if (!composerExpanded || typeof document === 'undefined') return
+      const card = findComposerCard()
+      if (card === null) return
+      const scrollBody = findComposerScrollBody(card)
+      const top = scrollBody === null ? 0 : scrollBody.getBoundingClientRect().top
+      const height = Math.max(180, Math.round(card.getBoundingClientRect().bottom - top - COMPOSER_EXPANDED_TOP_GAP))
+      document.body.style.setProperty(COMPOSER_HEIGHT_VARIABLE, `${height}px`)
+    }
+
+    function onComposerResize() {
+      applyComposerHeight()
+    }
+
+    /**
+     * Expanded drafts submit only through the send control: plain Enter
+     * becomes a line break regardless of the composer's Enter preference.
+     * The break goes through the browser's native editing command so Lexical
+     * sees the same beforeinput path as Shift+Enter and its model stays in
+     * sync with the DOM.
+     */
+    function onComposerKeydownCapture(event) {
+      if (!composerExpanded) return
+      if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return
+      if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+      const target = event.target
+      if (!(target instanceof HTMLElement)) return
+      const editor = target.closest(COMPOSER_INPUT_SELECTOR)
+      if (editor === null) return
+      // Keep the composer's own Enter (send) out of the loop, then let Lexical
+      // insert the break through its editing pipeline.
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+      editor.dispatchEvent(new InputEvent('beforeinput', {
+        inputType: 'insertText',
+        data: '\n',
+        bubbles: true,
+        cancelable: true,
+      }))
+    }
+
+    function setComposerExpanded(next) {
+      if (composerExpanded === next) return
+      composerExpanded = next
+      if (typeof document === 'undefined') return
+      if (next) {
+        document.body.setAttribute(COMPOSER_EXPANDED_ATTRIBUTE, '')
+        applyComposerHeight()
+        window.addEventListener('resize', onComposerResize)
+        document.addEventListener('keydown', onComposerKeydownCapture, true)
+        document.addEventListener('click', onComposerClickCapture, true)
+      } else {
+        document.body.removeAttribute(COMPOSER_EXPANDED_ATTRIBUTE)
+        document.body.style.removeProperty(COMPOSER_HEIGHT_VARIABLE)
+        window.removeEventListener('resize', onComposerResize)
+        document.removeEventListener('keydown', onComposerKeydownCapture, true)
+        document.removeEventListener('click', onComposerClickCapture, true)
+      }
+      updateComposerButton()
+    }
+
+    /** A submitted prompt restores the docked draft; the text is already gone. */
+    function onComposerClickCapture(event) {
+      if (!composerExpanded) return
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const button = target.closest('button')
+      if (button === null) return
+      const card = findComposerCard()
+      if (card === null) return
+      if (findComposerSendButton(card) !== button) return
+      // Let the click submit first, then collapse the card.
+      setTimeout(() => { setComposerExpanded(false) }, 0)
+    }
+
+    function removeComposerButton() {
+      if (composerButton === undefined) return
+      composerButton.remove()
+      composerButton = undefined
+    }
+
+    /** Mount the button beside the shipped controls, or retract it without a session. */
+    function syncComposerFeature() {
+      if (typeof document === 'undefined' || document.body === null) return
+      const card = findComposerCard()
+      if (card === null) {
+        // The composer left the page (session/view switch): retract the
+        // maximized draft with it rather than leaving a body-level override.
+        if (composerExpanded) setComposerExpanded(false)
+        removeComposerButton()
+        return
+      }
+      const tools = findComposerTools(card)
+      if (tools === null) {
+        removeComposerButton()
+        return
+      }
+      const modes = findComposerModes(tools)
+      // Still mounted in the right seat? React may insert new siblings around
+      // the row; re-anchor when the control drifted away from the mode group.
+      if (composerButton !== undefined && composerButton.parentElement === tools
+        && (modes === null || composerButton.nextElementSibling === modes)) return
+      removeComposerButton()
+      composerButton = createComposerButton()
+      // Between "+" and the permission/plan select; an absent group (the hero
+      // draft has no permission picker) simply puts the control after "+".
+      tools.insertBefore(composerButton, modes)
+      updateComposerButton()
+    }
+
+    /** Re-mount after the composer is rebuilt (session/view switches). */
+    function scheduleComposerSync() {
+      if (composerSyncScheduled) return
+      composerSyncScheduled = true
+      setTimeout(() => {
+        composerSyncScheduled = false
+        syncComposerFeature()
+      }, 0)
+    }
+
+    function attachComposerObserver() {
+      if (typeof MutationObserver === 'undefined' || document.body === null) return
+      if (composerObserver !== undefined) return
+      composerObserver = new MutationObserver(scheduleComposerSync)
+      composerObserver.observe(document.body, { childList: true, subtree: true })
+    }
+
+    function stopComposerObserver() {
+      if (composerObserver !== undefined) composerObserver.disconnect()
+      composerObserver = undefined
+      composerSyncScheduled = false
+    }
+
+    function restoreComposer() {
+      setComposerExpanded(false)
+      removeComposerButton()
+      stopComposerObserver()
     }
 
     function px(value) {
@@ -1031,8 +1281,12 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
             headerButtonDispose = undefined
           }
         })
+        ctx.effect(() => () => { restoreComposer() })
+        ctx.effect(() => ctx.locale.subscribe(updateComposerButton), 'ds-font-config: composer labels')
         applyStyles()
         syncRailFeature()
+        syncComposerFeature()
+        attachComposerObserver()
         ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section',
           id: 'ds-font-config',
