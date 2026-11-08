@@ -46,4 +46,6 @@ The bundle has no build step:
 - `locale/*.json` — Plugin Manager display metadata.
 - `icon.svg` — plugin icon.
 
+Version 0.2.2 — 2026-11-08: the rail-collapse sync falls back to a timer when `requestAnimationFrame` does not run (hidden or background tab), so collapsing there no longer leaves the rail visible; injected font stacks read each host font token once, so the monospace list and scoped overrides no longer repeat families.
+
 Version 0.2.1 — 2026-11-07: the rail-hiding title-bar button no longer renders in drawer mode, where the native opener already provides the toggle; the rail-collapse grid override also stays off on drawer frames.

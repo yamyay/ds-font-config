@@ -450,16 +450,25 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       railDiscoveryObserver.observe(document.body, { childList: true, subtree: true })
     }
 
+    /**
+     * rAF coalesces bursts of mutation records into one sync, but it does not
+     * run while the tab is hidden: a collapse that arrives there would leave
+     * the guard set and no later sync would ever run. The timer is the
+     * fallback — whichever fires first does the work, the other is a no-op.
+     */
     function scheduleRailSync() {
       if (railSyncScheduled) return
       railSyncScheduled = true
+      let applied = false
       const run = () => {
+        if (applied) return
+        applied = true
         railSyncScheduled = false
         applyRailCollapse()
         attachRailObserver()
       }
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run)
-      else run()
+      setTimeout(run, 120)
     }
 
     function stopRailObserver() {
@@ -506,8 +515,13 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       return `${list}, var(--dsh-font-family-text, var(--dsh-font-family-text-default)), var(--dsh-font-family-text-default)`
     }
 
+    /**
+     * Mirror the host stack shape: the user's list leads the built-in code
+     * stack and the host token (--dsh-font-family-code) holds the bare list.
+     * Reading that token here as well would repeat the same families twice.
+     */
     function monoFamilyStack(list) {
-      return `${list}, var(--dsh-font-family-code, var(--dsh-font-family-code-default)), var(--dsh-font-family-code-default)`
+      return `${list}, var(--dsh-font-family-code-default)`
     }
 
     /**
@@ -597,9 +611,12 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       const touched = settings.family !== '' || settings.size !== null || lineHeight !== null
       if (!touched) return ''
       const declarations = []
+      // An empty field follows the interface stack as a whole; a filled one
+      // must not prepend the interface families again, so it falls back to the
+      // host text stack instead of var(--dsg-ui-family).
       const family = settings.family === ''
         ? 'var(--dsg-ui-family)'
-        : `${settings.family}, var(--dsg-ui-family)`
+        : `${settings.family}, var(--dsh-font-family-text, var(--dsh-font-family-text-default)), var(--dsh-font-family-text-default)`
       declarations.push(`--dsw-font-family:${family};`)
       if (settings.size !== null) {
         const size = settings.size
@@ -633,7 +650,9 @@ html[data-platform='darwin'] [data-ds-rail-reopen],html[data-windows-titlebar] [
       }
       if (value.mono.family !== '') {
         const mono = monoFamilyStack(value.mono.family)
-        chunks.push(`html body{--dsw-font-mono:${mono} !important;--ds-font-family-code:${mono} !important;--dsh-font-family-code:${value.mono.family}, var(--dsh-font-family-code-default) !important;}`)
+        // The host token holds the bare list (its own sheet adds the built-in
+        // stack); repeating the list there as well would duplicate families.
+        chunks.push(`html body{--dsw-font-mono:${mono} !important;--ds-font-family-code:${mono} !important;--dsh-font-family-code:${value.mono.family} !important;}`)
       }
       if (value.mono.size !== null) {
         chunks.push(`html body{--dsh-code-font-size:${value.mono.size}px !important;}`)
